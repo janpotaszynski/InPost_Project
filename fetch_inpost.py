@@ -1,57 +1,49 @@
-import requests
 import json
 import time
-import numpy as np
+from pathlib import Path
 
-def fetch_inpost_points():
-    base_url = "https://api-global-points.easypack24.net/v1/points"
+import requests
+
+BASE_URL = "https://api-global-points.easypack24.net/v1/points"
+PER_PAGE = 500
+OUTPUT = Path("data/inpost_points.json")
+
+
+def fetch_all_points() -> list[dict]:
     points = []
     page = 1
 
-    print("Rozpoczynam pobieranie danych...")
-
     while True:
-        # Parametry zapytania: numer strony i liczba wyników na stronę (max 500)
-        params = {
-            'page': page,
-            'per_page': 500
-        }
-
-        try:
-            response = requests.get(base_url, params=params)
-            response.raise_for_status() # Rzuci błąd, jeśli status nie będzie 200
-
-            data = response.json()
-            items = data.get('items', [])
-
-            if not items:
-                break # Jeśli lista jest pusta, dotarliśmy do końca
-
-            points.extend(items)
-            print(f"Pobrano stronę {page}... (Łącznie punktów: {len(points)})")
-
-            # Sprawdzenie czy jest kolejna strona w metadanych (jeśli API je udostępnia)
-            # Jeśli nie, pętla przerwie się przy następnej pustej stronie
-            if page >= data.get('total_pages', float('inf')):
-                break
-
-            page += 1
-            # Krótka pauza, żeby nie przeciążyć serwera i nie dostać blokady (Rate Limiting)
-            time.sleep(0.1)
-
-        except requests.exceptions.RequestException as e:
-            print(f"Wystąpił błąd podczas pobierania strony {page}: {e}")
+        resp = requests.get(BASE_URL, params={"page": page, "per_page": PER_PAGE})
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("items", [])
+        if not items:
             break
+
+        points.extend(items)
+        print(f"  Page {page}: {len(points)} points total")
+
+        if page >= data.get("total_pages", float("inf")):
+            break
+
+        page += 1
+        time.sleep(0.1)
 
     return points
 
-# Uruchomienie i zapis do pliku
+
+def main() -> None:
+    if OUTPUT.exists():
+        print(f"Skipping (already exists): {OUTPUT}")
+        return
+
+    OUTPUT.parent.mkdir(exist_ok=True)
+    print("Fetching InPost points...")
+    points = fetch_all_points()
+    OUTPUT.write_text(json.dumps(points, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Saved {len(points)} points -> {OUTPUT}")
+
+
 if __name__ == "__main__":
-    all_points = fetch_inpost_points()
-
-    # Zapisujemy wszystko do pliku JSON
-    with open("data/inpost_points.json", "w", encoding="utf-8") as f:
-        json.dump(all_points, f, ensure_ascii=False, indent=4)
-
-    print(f"\nGotowe! Pomyślnie pobrano {len(all_points)} punktów.")
-    print("Dane zostały zapisane w pliku: inpost_points.json")
+    main()

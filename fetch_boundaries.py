@@ -1,5 +1,6 @@
-import requests
 from pathlib import Path
+
+import requests
 
 BASE_URL = "https://raw.githubusercontent.com/jusuff/PolandGeoJson/main/data"
 FILES = [
@@ -9,18 +10,19 @@ FILES = [
 ]
 
 
-def main():
+def main() -> None:
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
 
     for filename in FILES:
-        url = f"{BASE_URL}/{filename}"
-        print(f"Fetching {filename}...")
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
         out_path = data_dir / filename
-        out_path.write_bytes(response.content)
-        print(f"  Saved to {out_path}")
+        if out_path.exists():
+            print(f"  Skipping {filename} (already exists)")
+            continue
+        resp = requests.get(f"{BASE_URL}/{filename}", timeout=30)
+        resp.raise_for_status()
+        out_path.write_bytes(resp.content)
+        print(f"  Fetched {filename} -> {out_path}")
 
 
 if __name__ == "__main__":

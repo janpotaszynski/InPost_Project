@@ -1,23 +1,3 @@
-"""
-Fetches population data (variable 72305) from GUS BDL API for three
-administrative levels and saves them as parquet files in data/.
-
-Files produced:
-  data/populations_voivodeships.parquet   (unit-level 2,  ~16 rows)
-  data/populations_counties.parquet       (unit-level 5, ~382 rows)
-  data/populations_municipalities.parquet (unit-level 6, ~4157 rows)
-
-Columns in every file:
-  gus_id      – internal GUS identifier
-  name        – original name from API (e.g. "Powiat bocheński")
-  name_match  – normalised name used later to join with GeoJSON
-                  voivodeships  → uppercase as-is ("MAŁOPOLSKIE")
-                  counties      → strip "Powiat " / "Powiat m. " prefix, keep case
-                  municipalities → name as-is
-  population  – latest available year's value
-  year        – year of that value (str, e.g. "2024")
-"""
-
 import re
 import time
 from pathlib import Path
@@ -32,6 +12,14 @@ PAGE_SIZE = 100
 TIMEOUT = 60
 MAX_RETRIES = 5
 
+LEVELS = {
+    "voivodeships":    2,
+    "counties":        5,
+    "municipalities":  6,
+}
+
+_YEAR_SUFFIX_RE = re.compile(r"\s+(?:od|do)\s+\d{4}.*$")
+
 
 def _session() -> requests.Session:
     s = requests.Session()
@@ -43,25 +31,15 @@ def _session() -> requests.Session:
     s.mount("https://", HTTPAdapter(max_retries=retry))
     return s
 
-LEVELS = {
-    "voivodeships":    2,
-    "counties":        5,
-    "municipalities":  6,
-}
-
-
-_YEAR_SUFFIX_RE = re.compile(r"\s+(?:od|do)\s+\d{4}.*$")
-
 
 def _normalize_name(name: str, level: str) -> str:
     if level == "counties":
-        # must try longest prefix first so "Powiat m. st. " wins over "Powiat m. "
         for prefix in ("Powiat m. st. ", "Powiat m. ", "Powiat "):
             if name.startswith(prefix):
                 return name[len(prefix):]
     if level == "municipalities":
-        name = name.removeprefix("M.st.")           # "M.st.Warszawa od 2002" → "Warszawa od 2002"
-        name = _YEAR_SUFFIX_RE.sub("", name).strip() # "Warszawa od 2002"      → "Warszawa"
+        name = name.removeprefix("M.st.")
+        name = _YEAR_SUFFIX_RE.sub("", name).strip()
     return name
 
 
@@ -88,7 +66,7 @@ def fetch_level(level_name: str, unit_level: int) -> pd.DataFrame:
                 if attempt == MAX_RETRIES:
                     raise
                 wait = 2 ** attempt
-                print(f"    Timeout on page {page}, retrying in {wait}s (attempt {attempt}/{MAX_RETRIES})...")
+                print(f"    Timeout on page {page}, retrying in {wait}s ({attempt}/{MAX_RETRIES})...")
                 time.sleep(wait)
 
         data = resp.json()
@@ -103,22 +81,13 @@ def fetch_level(level_name: str, unit_level: int) -> pd.DataFrame:
             if not values:
                 continue
             latest = max(values, key=lambda v: v["year"])
-            name_match = _normalize_name(result["name"], level_name)
-            row = {
+            rows.append({
                 "gus_id":     result["id"],
                 "name":       result["name"],
-                "name_match": name_match,
+                "name_match": _normalize_name(result["name"], level_name),
                 "population": latest["val"],
                 "year":       latest["year"],
-            }
-            rows.append(row)
-            if "warszaw" in result["name"].lower() or "warszaw" in name_match.lower():
-                print(f"  [WARSZAWA] [{level_name}] "
-                      f"gus_id={result['id']}  "
-                      f"name={ascii(result['name'])}  "
-                      f"name_match={ascii(name_match)}  "
-                      f"population={latest['val']}  "
-                      f"year={latest['year']}")
+            })
 
         fetched = page * PAGE_SIZE + len(data["results"])
         if fetched >= total:
@@ -132,7 +101,7 @@ def fetch_level(level_name: str, unit_level: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main():
+def main() -> None:
     data_dir = Path("data")
     data_dir.mkdir(exist_ok=True)
 

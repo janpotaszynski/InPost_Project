@@ -21,7 +21,7 @@ STATS = {
     "Parcel machines – indoor":      "parcel_machines_indoor",
     "Parcel machines – outdoor":     "parcel_machines_outdoor",
     "Population":                    "population",
-    "Custom":                        None,
+    "Custom formula":                None,
 }
 
 # Short aliases used in custom formulas → actual column names
@@ -49,10 +49,25 @@ def load_data(filename: str) -> pd.DataFrame:
 
 
 def eval_formula(df: pd.DataFrame, formula: str) -> pd.Series:
-    """Evaluate a user formula using shortcut column names."""
     rename = {col: alias for alias, col in SHORTCUTS.items()}
     eval_df = df[list(SHORTCUTS.values())].rename(columns=rename).astype(float)
-    result = eval_df.eval(formula)
+
+    namespace = dict(eval_df)
+    namespace.update({
+        "sin": np.sin, "cos": np.cos, "tan": np.tan,
+        "arcsin": np.arcsin, "arccos": np.arccos, "arctan": np.arctan,
+        "arctan2": np.arctan2,
+        "sinh": np.sinh, "cosh": np.cosh, "tanh": np.tanh,
+        "arcsinh": np.arcsinh, "arccosh": np.arccosh, "arctanh": np.arctanh,
+        "log": np.log, "log10": np.log10, "log1p": np.log1p,
+        "abs": np.abs, "sqrt": np.sqrt, "exp": np.exp,
+    })
+
+    result = eval(formula, {"__builtins__": {}}, namespace)  # noqa: S307
+    if not isinstance(result, pd.Series):
+        result = pd.Series(result, index=df.index)
+    if pd.api.types.is_bool_dtype(result):
+        result = result.astype(float)
     return result.replace([np.inf, -np.inf], np.nan)
 
 
@@ -81,8 +96,8 @@ def build_map(
         marker_line_color="white",
         marker_line_width=0.5,
     ))
-    fig.update_geos(fitbounds="locations", visible=False)
-    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=650)
+    fig.update_geos(fitbounds="locations", visible=False, projection_type="mercator")
+    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0}, height=800)
     return fig
 
 
@@ -112,17 +127,28 @@ geojson_file, data_file = LEVELS[level]
 
 for path in [DATA_DIR / geojson_file, DATA_DIR / data_file]:
     if not path.exists():
-        st.error(f"Missing file: {path.name}. Run fetch and combine scripts first.")
+        st.error(f"Missing file: {path.name}. Run pipeline.py first.")
         st.stop()
 
 geojson = load_geojson(geojson_file)
 df      = load_data(data_file)
 
-if stat_label == "Custom":
+if stat_label == "Custom formula":
     formula = st.text_input(
         "Formula",
         placeholder="e.g. (total + 3*easy) / pop",
-        help="Use shortcuts listed in the sidebar. Arithmetic operators: + - * / ** ()",
+        help=(
+            "Use shortcuts listed in the sidebar.\n\n"
+            "**Arithmetic:** `+ - * / ** ()`\n\n"
+            "**Comparison:** `< <= == != >= >`\n\n"
+            "**Boolean:** `| (or)` · `& (and)` · `~ (not)` — treated as 0/1 on the map  \n"
+            "⚠️ `|` and `&` bind tighter than comparisons — always wrap each side: "
+            "`(a > b) | (c == d)`\n\n"
+            "**Trig:** `sin` `cos` `tan` `arcsin` `arccos` `arctan` `arctan2` "
+            "`sinh` `cosh` `tanh` `arcsinh` `arccosh` `arctanh`\n\n"
+            "**Math:** `log` (natural) · `log10` · `log1p` log(1+x) · "
+            "`abs` · `sqrt` · `exp`"
+        ),
     )
 
     if not formula.strip():
@@ -131,6 +157,18 @@ if stat_label == "Custom":
 
     try:
         color_values = eval_formula(df, formula)
+    except TypeError as e:
+        msg = str(e)
+        if any(f"for {op}" in msg for op in ("|", "&", "~")):
+            st.error(
+                f"Formula error: {e}\n\n"
+                "**Tip:** `|` and `&` bind tighter than comparisons in Python. "
+                "Wrap each comparison in parentheses:  \n"
+                f"`{formula}` → e.g. `(nonstop > outdoor) | (nonstop == outdoor)`"
+            )
+        else:
+            st.error(f"Formula error: {e}")
+        st.stop()
     except Exception as e:
         st.error(f"Formula error: {e}")
         st.stop()
@@ -140,6 +178,6 @@ if stat_label == "Custom":
 else:
     stat_col     = STATS[stat_label]
     color_values = pd.to_numeric(df[stat_col], errors="coerce")
-    fig = build_map(geojson, df, color_values, hover_label=stat_label, is_float=False)
+    fig = build_map(geojson, df, color_values, hover_label=stat_label)
 
 st.plotly_chart(fig, use_container_width=True)

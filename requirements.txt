@@ -1,0 +1,8 @@
+geopandas
+numpy
+pandas
+plotly
+pyarrow
+requests
+streamlit
+urllib3
