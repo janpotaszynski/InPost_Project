@@ -48,7 +48,7 @@ To run it yourself, follow the Getting Started steps below. The full pipeline ta
 **Prerequisites:** Python 3.11+
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/janpotaszynski/InPost_Project.git
 cd InPost_Project
 pip install -r requirements.txt
 ```
