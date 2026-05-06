@@ -25,7 +25,7 @@ The formula engine doubles as an exploratory tool. Instead of hard-coding a list
 ## Demo
 
 ### Voivodeship View
-![Voivodeship map showing number of parcel machine](screenshots/voivodeships.png)
+![Voivodeship map showing number of parcel machine](screenshots/voivodships.png)
 
 ### Counties View
 ![Counties map showing number of outdoor parcel machines](screenshots/counties.png)
