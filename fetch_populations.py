@@ -18,6 +18,7 @@ Columns in every file:
   year        – year of that value (str, e.g. "2024")
 """
 
+import re
 import time
 from pathlib import Path
 
@@ -49,11 +50,18 @@ LEVELS = {
 }
 
 
+_YEAR_SUFFIX_RE = re.compile(r"\s+(?:od|do)\s+\d{4}.*$")
+
+
 def _normalize_name(name: str, level: str) -> str:
     if level == "counties":
-        for prefix in ("Powiat m. ", "Powiat "):
+        # must try longest prefix first so "Powiat m. st. " wins over "Powiat m. "
+        for prefix in ("Powiat m. st. ", "Powiat m. ", "Powiat "):
             if name.startswith(prefix):
                 return name[len(prefix):]
+    if level == "municipalities":
+        name = name.removeprefix("M.st.")           # "M.st.Warszawa od 2002" → "Warszawa od 2002"
+        name = _YEAR_SUFFIX_RE.sub("", name).strip() # "Warszawa od 2002"      → "Warszawa"
     return name
 
 
@@ -95,13 +103,22 @@ def fetch_level(level_name: str, unit_level: int) -> pd.DataFrame:
             if not values:
                 continue
             latest = max(values, key=lambda v: v["year"])
-            rows.append({
+            name_match = _normalize_name(result["name"], level_name)
+            row = {
                 "gus_id":     result["id"],
                 "name":       result["name"],
-                "name_match": _normalize_name(result["name"], level_name),
+                "name_match": name_match,
                 "population": latest["val"],
                 "year":       latest["year"],
-            })
+            }
+            rows.append(row)
+            if "warszaw" in result["name"].lower() or "warszaw" in name_match.lower():
+                print(f"  [WARSZAWA] [{level_name}] "
+                      f"gus_id={result['id']}  "
+                      f"name={ascii(result['name'])}  "
+                      f"name_match={ascii(name_match)}  "
+                      f"population={latest['val']}  "
+                      f"year={latest['year']}")
 
         fetched = page * PAGE_SIZE + len(data["results"])
         if fetched >= total:
